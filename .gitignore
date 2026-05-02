@@ -1,0 +1,28 @@
+# secrets
+.env
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+
+# saved CRM profiles contain real customer PII — never commit
+samples/*.html
+profile_*.html
+nbl_login_page.html
+nbl_dashboard.html
+nbl_search.html
+nbl_profile_*.html
+
+# local logs / debug output
+*.log
+acc.html
+
+# Claude Code local settings (machine-specific)
+.claude/
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

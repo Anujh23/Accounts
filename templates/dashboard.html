@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ELI x Cashfree Reconciliation</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+  body { background:#f4f6f9; }
+  .navbar { background:#3b5054; }
+  .navbar-brand { color:#fff !important; font-weight:600; letter-spacing:.3px; }
+  .table-sm th, .table-sm td { vertical-align:middle; font-size:13px; }
+  .dry-on  { background:#fff3cd; border:2px solid #ffc107; color:#856404; }
+  .dry-off { background:#f8d7da; border:2px solid #dc3545; color:#721c24; }
+  .modal-payload { font-family:monospace; font-size:12px; background:#f8f9fa;
+                   padding:12px; border-radius:4px; white-space:pre-wrap;
+                   max-height:280px; overflow:auto; }
+  .col-num { text-align:right; font-variant-numeric:tabular-nums; }
+  td small { color:#6c757d; }
+</style>
+</head>
+<body>
+
+<nav class="navbar px-4 py-2">
+  <span class="navbar-brand"><span id="brandProduct">ELI</span> &times; Cashfree Reconciliation</span>
+  <div class="d-flex align-items-center gap-3">
+    <div class="btn-group btn-group-sm" role="group" aria-label="Product">
+      <input type="radio" class="btn-check" name="product" id="prodEli" value="ELI" checked>
+      <label class="btn btn-outline-light" for="prodEli">ELI</label>
+      <input type="radio" class="btn-check" name="product" id="prodNbl" value="NBL">
+      <label class="btn btn-outline-light" for="prodNbl">NBL</label>
+    </div>
+    <span id="dryRunBadge" class="px-3 py-2 rounded fw-bold dry-on">
+      DRY RUN — no real updates will be posted
+    </span>
+    <div class="form-check form-switch text-white">
+      <input class="form-check-input" type="checkbox" id="dryRunToggle" checked>
+      <label class="form-check-label" for="dryRunToggle">Dry run</label>
+    </div>
+    <a href="/accounts/" target="_blank" rel="noopener"
+       class="btn btn-sm btn-light fw-semibold"
+       title="Open Accounts (Cashfree / Easebuzz sheet)">
+      Accounts ↗
+    </a>
+  </div>
+</nav>
+
+<div class="container-fluid p-3">
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="row align-items-end g-3">
+        <div class="col-auto">
+          <label class="form-label mb-1">Quick range</label>
+          <select class="form-select form-select-sm" id="quickRange">
+            <option value="today" selected>Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="last7">Last 7 days</option>
+            <option value="last30">Last 30 days</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-1">Start</label>
+          <input type="date" class="form-control form-control-sm" id="startDate">
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-1">End</label>
+          <input type="date" class="form-control form-control-sm" id="endDate">
+        </div>
+        <div class="col-auto">
+          <button class="btn btn-primary btn-sm" id="fetchBtn">Fetch Cashfree</button>
+        </div>
+        <div class="col-auto">
+          <button class="btn btn-outline-secondary btn-sm" id="matchAllBtn" disabled>Match all</button>
+        </div>
+        <div class="col">
+          <div id="status" class="text-muted small">Pick a date range and click "Fetch".</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm table-bordered table-hover mb-0">
+          <thead class="table-dark">
+            <tr>
+              <th>#</th>
+              <th>Cashfree Date</th>
+              <th>Mobile</th>
+              <th>Customer (CF)</th>
+              <th class="col-num">CF Order Amt</th>
+              <th>CF Txn ID</th>
+              <th>Lead</th>
+              <th class="col-num">Loan Disbursed</th>
+              <th class="col-num">Paid Amount</th>
+              <th class="col-num">Repay</th>
+              <th title="Real Days / No of Days (tenure)">Days <small>(R/T)</small></th>
+              <th>Match</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="rows">
+            <tr><td colspan="12" class="text-center text-muted py-4">No data yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Confirmation modal -->
+<div class="modal fade" id="confirmModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header bg-warning">
+        <h5 class="modal-title">Confirm CRM Update</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2"><strong>You are about to mark this loan as Closed in the ELI CRM.</strong></p>
+        <div id="confirmSummary" class="alert alert-info mb-3"></div>
+        <div class="fw-bold mb-1">Payload to be sent to /admin/setCollection:</div>
+        <div id="confirmPayload" class="modal-payload"></div>
+        <div id="dryRunNotice" class="alert alert-warning mt-3 mb-0" style="display:none">
+          DRY RUN is ON — clicking will NOT post to CRM. Server will only log the payload.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirmUpdateBtn">Yes, send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const ymd = d => d.toISOString().slice(0,10);
+const minusDays = n => { const x = new Date(); x.setDate(x.getDate()-n); return x; };
+const today = new Date();
+const TOL = 5;  // ₹5 round-off — |cf - repay| <= 5 treated as exact close
+
+let currentRows = [];
+let pending = null;
+
+const getProduct = () => document.querySelector('input[name="product"]:checked').value;
+
+document.querySelectorAll('input[name="product"]').forEach(el => {
+  el.addEventListener("change", () => {
+    $("brandProduct").textContent = getProduct();
+    currentRows = [];
+    renderRows();  // clear table so old product's matches don't bleed in
+    $("status").textContent = `Switched to ${getProduct()}. Pick a date range and click "Fetch".`;
+    $("matchAllBtn").disabled = true;
+  });
+});
+
+$("startDate").value = ymd(today);
+$("endDate").value   = ymd(today);
+
+$("dryRunToggle").addEventListener("change", e => {
+  const b = $("dryRunBadge");
+  if (e.target.checked) {
+    b.className = "px-3 py-2 rounded fw-bold dry-on";
+    b.textContent = "DRY RUN — no real updates will be posted";
+  } else {
+    b.className = "px-3 py-2 rounded fw-bold dry-off";
+    b.textContent = "LIVE — updates WILL post to ELI CRM";
+  }
+});
+
+$("quickRange").addEventListener("change", e => {
+  const set = (s, en) => { $("startDate").value = s; $("endDate").value = en; };
+  const v = e.target.value;
+  if (v === "today")     set(ymd(today), ymd(today));
+  if (v === "yesterday") set(ymd(minusDays(1)), ymd(minusDays(1)));
+  if (v === "last7")     set(ymd(minusDays(6)), ymd(today));
+  if (v === "last30")    set(ymd(minusDays(29)), ymd(today));
+});
+
+$("fetchBtn").addEventListener("click", async () => {
+  const start = $("startDate").value, end = $("endDate").value;
+  const status = $("status");
+  status.textContent = "Fetching from Cashfree (this may take a few seconds)...";
+  $("rows").innerHTML = '<tr><td colspan="12" class="text-center py-4"><div class="spinner-border spinner-border-sm"></div> Loading...</td></tr>';
+  try {
+    const r = await fetch("/api/cashfree", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({start, end, product: getProduct()}),
+    });
+    const data = await r.json();
+    currentRows = data.rows || [];
+    status.textContent = `Loaded ${currentRows.length} unique mobiles (from ${data.raw_count} total SUCCESS payments).`;
+    renderRows();
+    $("matchAllBtn").disabled = currentRows.length === 0;
+  } catch (err) {
+    status.textContent = "Error: " + err.message;
+    $("rows").innerHTML = '<tr><td colspan="12" class="text-center text-danger py-4">Fetch failed.</td></tr>';
+  }
+});
+
+$("matchAllBtn").addEventListener("click", async () => {
+  $("matchAllBtn").disabled = true;
+  for (let i = 0; i < currentRows.length; i++) await matchRow(i);
+  $("matchAllBtn").disabled = false;
+});
+
+function renderRows() {
+  const tbody = $("rows");
+  if (currentRows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4">No SUCCESS payments in this window.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = currentRows.map((r, i) => `
+    <tr>
+      <td>${i+1}</td>
+      <td><small>${(r.event_time||'').slice(0,16).replace('T',' ')}</small></td>
+      <td>${r.customer_phone}</td>
+      <td>${r.customer_name||'-'}</td>
+      <td class="col-num">&#8377;${r.order_amount}</td>
+      <td><small>${r.cf_payment_id}</small></td>
+      <td id="lead-${i}">-</td>
+      <td class="col-num" id="disb-${i}">-</td>
+      <td class="col-num" id="paid-${i}">-</td>
+      <td class="col-num" id="repay-${i}">-</td>
+      <td id="days-${i}" class="col-num">-</td>
+      <td id="match-${i}"><span class="badge bg-secondary">unmatched</span></td>
+      <td>
+        <button class="btn btn-sm btn-outline-primary" onclick="matchRow(${i})">Match</button>
+        <button class="btn btn-sm btn-danger" id="upd-${i}" disabled onclick="openConfirm(${i})">Update CRM</button>
+      </td>
+    </tr>`).join("");
+}
+
+// Mirror of app.py:_decide_action — backend re-decides authoritatively.
+function decideAction(lead, cf) {
+  if (lead.repay_amount == null) return {ok: false, reason: "no repay amt"};
+  const diff = cf - lead.repay_amount;
+  if (Math.abs(diff) <= TOL) {
+    if (lead.no_of_days == null || lead.real_days == null) {
+      return {ok: false, reason: "days missing"};
+    }
+    return lead.real_days < lead.no_of_days
+      ? {ok: true, status: "PAYDAY PRECLOSE", remark: "Payday preclose"}
+      : {ok: true, status: "Closed",          remark: "Closed via Cashfree reconciliation"};
+  }
+  if (diff < 0) return {ok: true, status: "Part Payment", remark: "Part payment"};
+  return {ok: false, reason: `overpay +₹${diff.toFixed(2)}`};
+}
+
+function statusBadgeCls(status) {
+  if (status === "PAYDAY PRECLOSE") return "bg-warning text-dark";
+  if (status === "Part Payment")    return "bg-info text-dark";
+  return "bg-danger";  // Closed
+}
+
+const CRM_BASE = {
+  ELI: "https://app.everydayloanindia.co.in/admin",
+  NBL: "https://app.nextbigloan.co.in/admin",
+};
+
+function renderLeadCell(lead) {
+  const base = CRM_BASE[lead.product || getProduct()];
+  const url = `${base}/profile/${lead.leadID}`;
+  const disb = lead.disbursal_date ? `<br><small class="text-muted">Disbursed: ${lead.disbursal_date}</small>` : "";
+  return `<a href="${url}" target="_blank">${lead.leadID}</a><br><small>${lead.name}<br>${lead.status}</small>${disb}`;
+}
+
+function renderDaysCell(lead) {
+  const {real_days: rd, no_of_days: nd} = lead;
+  if (rd == null || nd == null) return "-";
+  const isPreclose = rd < nd;
+  const cls = isPreclose ? "text-warning" : "text-muted";
+  const tag = isPreclose ? `<br><small class="text-warning">preclose</small>` : "";
+  return `<span class="${cls}"><strong>${rd}</strong> / ${nd}</span>${tag}`;
+}
+
+function renderMatchBadge(action, lead, cf) {
+  if (action.ok && action.status === "Part Payment") {
+    return `<span class="badge bg-info text-dark" title="Cashfree ₹${cf} of ₹${lead.repay_amount} outstanding — will post as Part Payment">PART &#8377;${cf}/&#8377;${lead.repay_amount}</span>`;
+  }
+  if (action.ok) return '<span class="badge bg-success">MATCH</span>';
+  const isOverpay = action.reason && action.reason.startsWith("overpay");
+  const cls = isOverpay ? "bg-danger" : "bg-warning text-dark";
+  return `<span class="badge ${cls}" title="${action.reason || ''}">${action.reason || '?'}</span>`;
+}
+
+async function matchRow(i) {
+  const r = currentRows[i];
+  $(`match-${i}`).innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  try {
+    const resp = await fetch("/api/match", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({mobile: r.customer_phone, product: getProduct()}),
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      $(`lead-${i}`).innerHTML  = data.leadID ? `<small>${data.leadID}</small>` : "-";
+      $(`match-${i}`).innerHTML = `<span class="badge bg-secondary">${data.reason}</span>`;
+      return;
+    }
+    const lead = data.lead;
+    r._lead = lead;
+    const cf = parseFloat(r.order_amount);
+    const action = decideAction(lead, cf);
+
+    $(`lead-${i}`).innerHTML  = renderLeadCell(lead);
+    $(`disb-${i}`).innerHTML  = lead.loan_disbursed != null ? `&#8377;${lead.loan_disbursed}` : "-";
+    $(`paid-${i}`).innerHTML  = `&#8377;${lead.paid_amount || 0}`;
+    $(`repay-${i}`).innerHTML = `&#8377;${lead.repay_amount}`;
+    $(`days-${i}`).innerHTML  = renderDaysCell(lead);
+    $(`match-${i}`).innerHTML = renderMatchBadge(action, lead, cf);
+    if (action.ok) $(`upd-${i}`).disabled = false;
+  } catch (err) {
+    $(`match-${i}`).innerHTML = `<span class="badge bg-danger">err</span>`;
+  }
+}
+
+function openConfirm(i) {
+  const r = currentRows[i];
+  const lead = r._lead;
+  const cf = parseFloat(r.order_amount);
+  const action = decideAction(lead, cf);
+  if (!action.ok) { alert(`Cannot post: ${action.reason}.`); return; }
+  const {status, remark} = action;
+  pending = {i, lead, amount: r.order_amount, refNo: r.cf_payment_id};
+
+  const daysLine = (lead.real_days != null && lead.no_of_days != null)
+    ? `<div><strong>Days (Real / Tenure):</strong> ${lead.real_days} / ${lead.no_of_days}</div>` : "";
+  const partLine = status === "Part Payment"
+    ? `<div class="text-info"><strong>Outstanding after this:</strong> &#8377;${(lead.repay_amount - cf).toFixed(2)} (loan stays open)</div>` : "";
+  const disbLine = lead.disbursal_date
+    ? `<div><strong>Disbursed on:</strong> ${lead.disbursal_date}</div>` : "";
+
+  $("confirmSummary").innerHTML = `
+    <div><strong>Customer:</strong> ${lead.name}</div>
+    <div><strong>Mobile:</strong> ${r.customer_phone}</div>
+    <div><strong>LeadID:</strong> ${lead.leadID} &nbsp; <strong>LoanNo:</strong> ${lead.loanNo}</div>
+    ${disbLine}
+    <div><strong>ELI Outstanding (Repay Amount):</strong> &#8377;${lead.repay_amount}</div>
+    <div><strong>Cashfree Order Amount:</strong> &#8377;${r.order_amount}</div>
+    <div><strong>Cashfree Txn ID (referenceNo):</strong> ${r.cf_payment_id}</div>
+    ${daysLine}
+    ${partLine}
+    <div><strong>Status will be set to:</strong> <span class="badge ${statusBadgeCls(status)}">${status}</span></div>
+    <div><strong>Remark:</strong> ${remark}</div>`;
+
+  const payload = {
+    collectedAmount:  r.order_amount,
+    collectedMode:    "Account",
+    referenceNo:      r.cf_payment_id,
+    collectedDate:    ymd(new Date()),
+    discountAmount:   "0.00",
+    settlemenAmount:  "0.00",
+    status, remark,
+    collectionSource: "Collection",
+    interestAmount:   "0.00",
+    penaltyAmount:    "0.00",
+    loanNo:    lead.loanNo,
+    contactID: lead.contactID,
+    leadID:    lead.leadID,
+  };
+  $("confirmPayload").textContent = JSON.stringify(payload, null, 2);
+
+  const dryRun = $("dryRunToggle").checked;
+  $("dryRunNotice").style.display = dryRun ? "block" : "none";
+  const btn = $("confirmUpdateBtn");
+  btn.textContent = dryRun ? "Send (DRY RUN — won't post)" : "POST to CRM";
+  btn.className   = dryRun ? "btn btn-warning" : "btn btn-danger";
+  new bootstrap.Modal($("confirmModal")).show();
+}
+
+$("confirmUpdateBtn").addEventListener("click", async () => {
+  if (!pending) return;
+  const {i, lead, amount, refNo} = pending;
+  const dryRun = $("dryRunToggle").checked;
+  const btn = $("confirmUpdateBtn");
+  btn.disabled = true; btn.textContent = "Sending...";
+  try {
+    const resp = await fetch("/api/update", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        leadID: lead.leadID, contactID: lead.contactID, loanNo: lead.loanNo,
+        amount, referenceNo: refNo, dry_run: dryRun,
+        repay_amount: lead.repay_amount,
+        no_of_days: lead.no_of_days, real_days: lead.real_days,
+        product: getProduct(),
+      }),
+    });
+    const data = await resp.json();
+    bootstrap.Modal.getInstance($("confirmModal")).hide();
+    // CRMs return HTTP 200 even on rejection — trust the explicit `success` flag.
+    const tag = dryRun
+      ? '<span class="badge bg-warning text-dark">DRY RUN sent</span>'
+      : (data.success
+          ? '<span class="badge bg-success">Done</span>'
+          : `<span class="badge bg-danger" title="${(data.body||'').slice(0,200).replace(/"/g,'&quot;')}">FAILED</span>`);
+    $(`match-${i}`).innerHTML = tag;
+    $(`upd-${i}`).disabled = true;
+    alert(`${dryRun ? 'DRY RUN' : 'POSTED'} for LeadID ${lead.leadID}\n\nServer response:\n${(data.body||'').slice(0,500)}`);
+  } catch (err) {
+    alert("Error: " + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
