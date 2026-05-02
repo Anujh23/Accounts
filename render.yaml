@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: auto-collection
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && playwright install chromium chromium-headless-shell
+    # 1 sync worker — Playwright sync API isn't thread-safe.
+    # Multiple users queue; 5-min cache softens repeat lookups.
+    # 180s timeout for first Easebuzz cold-start login.
+    # max-requests recycles worker to release Chromium memory.
+    startCommand: playwright install chromium-headless-shell && gunicorn -w 1 -b 0.0.0.0:$PORT app:app --timeout 180 --max-requests 200 --max-requests-jitter 20
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      # All secrets below: set values in the Render dashboard, NOT in this file.
+      - key: ELI_USERNAME
+        sync: false
+      - key: ELI_PASSWORD
+        sync: false
+      - key: ELI_CLIENT_ID
+        sync: false
+      - key: ELI_CLIENT_SECRET
+        sync: false
+      - key: NBL_USERNAME
+        sync: false
+      - key: NBL_PASSWORD
+        sync: false
+      - key: NBL_CLIENT_ID
+        sync: false
+      - key: NBL_CLIENT_SECRET
+        sync: false
+      - key: LDR_CLIENT_ID
+        sync: false
+      - key: LDR_CLIENT_SECRET
+        sync: false
+      - key: CPY_CLIENT_ID
+        sync: false
+      - key: CPY_CLIENT_SECRET
+        sync: false
+      - key: EB_EMAIL
+        sync: false
+      - key: EB_PASSWORD
+        sync: false

@@ -2,3 +2,4 @@ flask>=3.1
 python-dotenv>=1.2
 requests>=2.32
 playwright>=1.45
+gunicorn>=21.2
