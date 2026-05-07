@@ -260,7 +260,7 @@ PRODUCT_HOME = """
 <body>
   <div class="container">
     <h1>{{ product.name }}</h1>
-    <div class="subtitle">Select a payment gateway</div>
+    <div class="subtitle">Select a service</div>
     <div class="tile-grid">
       {% for svc in product.services %}
         <a class="tile" href="/accounts/{{ slug }}/{{ svc }}">
