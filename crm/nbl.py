@@ -90,12 +90,18 @@ def session_alive(s):
         return False
 
 
-def search_by_mobile(s, mobile):
-    r = s.post(SEARCH_URL, data={"searchData": mobile}, timeout=30)
+def search(s, query):
+    """Search CRM by any value (loan no, mobile, name, etc.).
+    The /disbursedDataSearch endpoint does a multi-field search on `searchData`."""
+    r = s.post(SEARCH_URL, data={"searchData": query}, timeout=30)
     r.raise_for_status()
     p = _RowExtractor()
     p.feed(r.text)
     return [dict(zip(HEADERS_ORDER, row)) for row in p.rows]
+
+
+def search_by_mobile(s, mobile):
+    return search(s, mobile)
 
 
 def get_latest_lead(s, mobile):
@@ -116,6 +122,7 @@ _PROFILE_FIELDS = [
     ("loan_disbursed", re.compile(rf"Loan\s+Disbursed\s*:\s*Rs\.?\s*{_AMT}",   re.I), float),
     ("no_of_days",     re.compile(r"No\s+of\s+Days\s*:\s*(\d+)\s*Days", re.I), int),
     ("real_days",      re.compile(r"Real\s+Days\s*:\s*(\d+)\s*Days",   re.I), int),
+    ("penalty_days",   re.compile(r"Penalty\s+[Dd]ays\s*:\s*(\d+)\s*Days", re.I), int),
     ("disbursal_date", re.compile(r"Disbursal\s+date\s*:\s*(\d{2}-\d{2}-\d{4}(?:\s+\d{2}:\d{2}:\d{2})?)", re.I), str),
 ]
 _RE_FORM    = re.compile(r"<form[^>]*id=[\"']collectionAdd[\"'].*?</form>", re.S)
@@ -138,6 +145,7 @@ def get_repay_info(s, lead_id):
         "loan_disbursed": None,
         "no_of_days": None,
         "real_days": None,
+        "penalty_days": None,
         "disbursal_date": None,
     }
     for key, rx, cast in _PROFILE_FIELDS:
