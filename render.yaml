@@ -48,3 +48,7 @@ services:
       # How often the poller fetches today's Cashfree payments (seconds).
       - key: POLL_INTERVAL_SECONDS
         value: "120"
+      # Postgres URL for persisting processed cf_payment_ids + review queue
+      # across redeploys. Set the value in Render dashboard (NOT here).
+      - key: DATABASE_URL
+        sync: false

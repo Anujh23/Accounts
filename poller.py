@@ -5,33 +5,25 @@ Cashfree payments for each product (ELI/NBL), matches them against the
 CRM, and either posts to setCollection (AUTO_LIVE=1) or just logs the
 payload (default — same dry-run idea as the dashboard).
 
-Uses the existing API credentials (*_CLIENT_ID/*_CLIENT_SECRET +
-CRM USERNAME/PASSWORD). Nothing extra to configure.
-
-Duplicate guard: relies on the CRM closed-status check — a loan that's
-already Closed (whether by this poller, a human in the dashboard, or
-the CRM team directly) won't be touched again."""
+State (processed cf_payment_ids + review queue entries) is persisted to
+Postgres via db.py so it survives Render redeploys and worker recycles.
+Falls back to in-memory only if DATABASE_URL is unset (degraded mode)."""
 import json
 import os
 import threading
 import time
 from datetime import date
-from pathlib import Path
 
 from flask import Blueprint, jsonify
 
 import core
+import db
 
 bp = Blueprint("poller", __name__)
 
-REVIEW_LOG = Path(__file__).resolve().parent / "review_queue.jsonl"
-PROCESSED_LOG = Path(__file__).resolve().parent / "processed.jsonl"
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL_SECONDS", "120"))  # 2 min default
 
-# Persisted across worker recycles. cf_payment_ids handled in any past tick.
-# File survives gunicorn worker restarts (it lives on Render's local disk).
-# Lost on full redeploy — first tick then re-checks everything once.
-_processed = set()
+_processed = set()  # cf_payment_ids handled in any tick (loaded from DB at start)
 _processed_lock = threading.Lock()
 _poller_started = False
 _last_tick_at = 0.0
@@ -43,45 +35,37 @@ def _auto_live():
 
 
 def _load_processed():
-    """Read PROCESSED_LOG into _processed at startup. Idempotent — safe to
-    call before start_background()."""
-    if not PROCESSED_LOG.exists():
-        return
+    """Hydrate the in-memory dedup set from Postgres on poller startup.
+    If DB is unreachable we log it and start empty — the CRM's own UTR
+    uniqueness check still prevents double-posting."""
     try:
-        with PROCESSED_LOG.open(encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    _processed.add(line)
-        print(f"[poller] loaded {len(_processed)} processed cf_payment_ids from disk")
+        ids = db.load_processed()
+        _processed.update(ids)
+        print(f"[poller] loaded {len(_processed)} processed cf_payment_ids from DB")
     except Exception as e:
-        print(f"[poller] FAILED to load processed log: {e}")
+        print(f"[poller] FAILED to load processed from DB: {e}")
 
 
-def _persist_processed(cf_id):
-    """Append a single cf_payment_id to PROCESSED_LOG. Caller must already
-    hold the in-memory _processed update."""
+def _persist_processed(cf_id, product):
+    """Insert into poller_processed table. Best-effort — a DB error here
+    doesn't abort the tick (in-memory set already has it for this run)."""
     try:
-        with PROCESSED_LOG.open("a", encoding="utf-8") as f:
-            f.write(cf_id + "\n")
+        db.mark_processed(cf_id, product)
     except Exception as e:
-        print(f"[poller] FAILED to persist {cf_id}: {e}")
+        print(f"[poller] FAILED to persist {cf_id} to DB: {e}")
 
 
 def _log_review(product, reason, row, extras=None):
-    entry = {
-        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "product": product,
-        "reason": reason,
-        "row": row,
-    }
+    """Write one review entry to Postgres. Caller passes the original Cashfree
+    row plus any extras (lead info, payload) — all bundled into the JSONB blob."""
+    payload = {"row": row}
     if extras:
-        entry.update(extras)
+        payload.update(extras)
+    cf_id = (row or {}).get("cf_payment_id")
     try:
-        with REVIEW_LOG.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        db.log_review(product, reason, cf_id, payload)
     except Exception as e:
-        print(f"[poller:{product}] FAILED to write review queue: {e}")
+        print(f"[poller:{product}] FAILED to write review to DB: {e}")
 
 
 def _process_row(product, row):
@@ -94,7 +78,7 @@ def _process_row(product, row):
         if cf_id in _processed:
             return "skip_dup"
         _processed.add(cf_id)
-        _persist_processed(cf_id)
+    _persist_processed(cf_id, product)
 
     mobile = (row.get("customer_phone") or "").strip()
     try:
@@ -119,9 +103,7 @@ def _process_row(product, row):
         return "review"
 
     if lead.get("Status") in crm.CLOSED_STATUSES:
-        # Already closed by someone (manual dashboard, CRM team, or earlier
-        # poll tick that posted before the process restart). Quiet skip —
-        # this is the expected steady-state for handled payments.
+        # Already closed by someone — quiet skip, no review entry needed.
         return "skip_closed"
 
     try:
@@ -201,7 +183,6 @@ def _poll_once():
             outcome = _process_row(product, row)
             counts[outcome] = counts.get(outcome, 0) + 1
         summary[product] = counts
-        # Always log per-product tick summary so you can see the poller is alive.
         print(f"[poller:{product}] posted={counts['posted']} "
               f"review={counts['review']} dry_run={counts['dry_run']} "
               f"skip_closed={counts['skip_closed']} skip_dup={counts['skip_dup']} "
@@ -210,8 +191,6 @@ def _poll_once():
     _last_tick_at = time.time()
     _last_tick_summary = summary
     print(f"[poller] === tick done in {elapsed:.1f}s, next in {POLL_INTERVAL}s ===")
-    _last_tick_at = time.time()
-    _last_tick_summary = summary
 
 
 def _poll_loop():
@@ -238,20 +217,14 @@ def start_background():
 
 @bp.route("/api/review-queue", methods=["GET"])
 def review_queue():
-    """JSONL review log (newest first) + poller status. Dashboard can hit
-    this to show what auto-skipped and needs human attention."""
-    entries = []
-    if REVIEW_LOG.exists():
-        with REVIEW_LOG.open(encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entries.append(json.loads(line))
-                except Exception:
-                    continue
-        entries.reverse()
+    """Review entries from Postgres (newest first) + poller status. Dashboard
+    can hit this to show what auto-skipped and needs human attention."""
+    try:
+        entries = db.fetch_review_queue(limit=500)
+        db_error = None
+    except Exception as e:
+        entries = []
+        db_error = str(e)
     return jsonify({
         "entries": entries,
         "count": len(entries),
@@ -260,4 +233,5 @@ def review_queue():
         "last_tick_at": _last_tick_at,
         "last_tick_summary": _last_tick_summary,
         "processed_in_memory": len(_processed),
+        "db_error": db_error,
     })
