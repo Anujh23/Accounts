@@ -41,3 +41,10 @@ services:
         sync: false
       - key: EB_PASSWORD
         sync: false
+      # Auto-post poller (background thread in app.py).
+      # AUTO_LIVE=1 actually POSTs to CRM. Anything else = dry-run, logs only.
+      - key: AUTO_LIVE
+        value: "1"
+      # How often the poller fetches today's Cashfree payments (seconds).
+      - key: POLL_INTERVAL_SECONDS
+        value: "120"

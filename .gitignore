@@ -18,6 +18,9 @@ nbl_profile_*.html
 *.log
 acc.html
 
+# auto-poller review queue — contains customer PII (mobile, email, name)
+review_queue.jsonl
+
 # Claude Code local settings (machine-specific)
 .claude/
 
