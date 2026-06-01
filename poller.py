@@ -142,6 +142,9 @@ def _poll_once():
     global _last_tick_at, _last_tick_summary
     today = date.today().isoformat()
     summary = {}
+    tick_start = time.time()
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[poller] === tick start @ {stamp} ===")
     for product in core.PRODUCTS:
         cashfree = core.PRODUCTS[product]["cashfree"]
         counts = {"posted": 0, "dry_run": 0, "review": 0,
@@ -167,13 +170,13 @@ def _poll_once():
             outcome = _process_row(product, row)
             counts[outcome] = counts.get(outcome, 0) + 1
         summary[product] = counts
-        # Only log tick summary when something actually happened — silent ticks
-        # (all dedup'd) would otherwise spam the log every 2 min.
-        if counts["posted"] or counts["dry_run"] or counts["review"]:
-            print(f"[poller:{product}] posted={counts['posted']} "
-                  f"review={counts['review']} dry_run={counts['dry_run']} "
-                  f"skip_closed={counts['skip_closed']} skip_dup={counts['skip_dup']} "
-                  f"rows={counts['rows']}")
+        # Always log per-product tick summary so you can see the poller is alive.
+        print(f"[poller:{product}] posted={counts['posted']} "
+              f"review={counts['review']} dry_run={counts['dry_run']} "
+              f"skip_closed={counts['skip_closed']} skip_dup={counts['skip_dup']} "
+              f"rows={counts['rows']}")
+    elapsed = time.time() - tick_start
+    print(f"[poller] === tick done in {elapsed:.1f}s, next in {POLL_INTERVAL}s ===")
     _last_tick_at = time.time()
     _last_tick_summary = summary
 
