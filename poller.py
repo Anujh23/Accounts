@@ -207,6 +207,8 @@ def _poll_once():
               f"skip_closed={counts['skip_closed']} skip_dup={counts['skip_dup']} "
               f"rows={counts['rows']}")
     elapsed = time.time() - tick_start
+    _last_tick_at = time.time()
+    _last_tick_summary = summary
     print(f"[poller] === tick done in {elapsed:.1f}s, next in {POLL_INTERVAL}s ===")
     _last_tick_at = time.time()
     _last_tick_summary = summary
