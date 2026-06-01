@@ -25,9 +25,13 @@ import core
 bp = Blueprint("poller", __name__)
 
 REVIEW_LOG = Path(__file__).resolve().parent / "review_queue.jsonl"
+PROCESSED_LOG = Path(__file__).resolve().parent / "processed.jsonl"
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL_SECONDS", "120"))  # 2 min default
 
-_processed = set()  # cf_payment_ids handled in this process — avoid re-work
+# Persisted across worker recycles. cf_payment_ids handled in any past tick.
+# File survives gunicorn worker restarts (it lives on Render's local disk).
+# Lost on full redeploy — first tick then re-checks everything once.
+_processed = set()
 _processed_lock = threading.Lock()
 _poller_started = False
 _last_tick_at = 0.0
@@ -36,6 +40,32 @@ _last_tick_summary = {}
 
 def _auto_live():
     return os.getenv("AUTO_LIVE", "").strip() == "1"
+
+
+def _load_processed():
+    """Read PROCESSED_LOG into _processed at startup. Idempotent — safe to
+    call before start_background()."""
+    if not PROCESSED_LOG.exists():
+        return
+    try:
+        with PROCESSED_LOG.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    _processed.add(line)
+        print(f"[poller] loaded {len(_processed)} processed cf_payment_ids from disk")
+    except Exception as e:
+        print(f"[poller] FAILED to load processed log: {e}")
+
+
+def _persist_processed(cf_id):
+    """Append a single cf_payment_id to PROCESSED_LOG. Caller must already
+    hold the in-memory _processed update."""
+    try:
+        with PROCESSED_LOG.open("a", encoding="utf-8") as f:
+            f.write(cf_id + "\n")
+    except Exception as e:
+        print(f"[poller] FAILED to persist {cf_id}: {e}")
 
 
 def _log_review(product, reason, row, extras=None):
@@ -64,6 +94,7 @@ def _process_row(product, row):
         if cf_id in _processed:
             return "skip_dup"
         _processed.add(cf_id)
+        _persist_processed(cf_id)
 
     mobile = (row.get("customer_phone") or "").strip()
     try:
@@ -198,6 +229,7 @@ def start_background():
     if _poller_started:
         return
     _poller_started = True
+    _load_processed()
     t = threading.Thread(target=_poll_loop, daemon=True, name="cashfree-poller")
     t.start()
 

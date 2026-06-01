@@ -21,6 +21,9 @@ acc.html
 # auto-poller review queue — contains customer PII (mobile, email, name)
 review_queue.jsonl
 
+# auto-poller dedup log — transient state, regenerated at runtime
+processed.jsonl
+
 # Claude Code local settings (machine-specific)
 .claude/
 
