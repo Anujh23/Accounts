@@ -9,6 +9,12 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+# Python 3.14 has a thread-safety bug where datetime.strptime triggers a lazy
+# import of _strptime that races between threads (poller + dashboard fetch).
+# Force the lazy import here, single-threaded at module load, so concurrent
+# calls don't see a half-initialized _strptime module.
+datetime.strptime("2000-01-01", "%Y-%m-%d")
+
 BANK_REF_WORKERS = 16
 
 _session = requests.Session()
