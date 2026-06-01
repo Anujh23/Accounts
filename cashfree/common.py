@@ -63,7 +63,7 @@ WANTED_FIELDS = [
 
 
 def fetch_recon(client_id, client_secret, start_date, end_date,
-                enrich_bank_reference=True):
+                enrich_bank_reference=True, quiet=False):
     if not client_id or not client_secret:
         raise RuntimeError("Cashfree client_id / client_secret not set")
 
@@ -94,7 +94,8 @@ def fetch_recon(client_id, client_secret, start_date, end_date,
         data = r.json()
         batch = data.get("data", [])
         all_records.extend(batch)
-        print(f"[cashfree] page {page_num}: +{len(batch)} (total {len(all_records)})")
+        if not quiet:
+            print(f"[cashfree] page {page_num}: +{len(batch)} (total {len(all_records)})")
         cursor = data.get("cursor")
         if not cursor:
             break
@@ -137,7 +138,8 @@ def fetch_recon(client_id, client_secret, start_date, end_date,
                     print(f"[cashfree] bank_ref worker error row {idx}: {e}")
 
     rows.sort(key=lambda x: x.get("event_time", ""), reverse=True)
-    print(f"[cashfree] {len(rows)} SUCCESS rows after filters")
+    if not quiet:
+        print(f"[cashfree] {len(rows)} SUCCESS rows after filters")
     return WANTED_FIELDS, rows
 
 

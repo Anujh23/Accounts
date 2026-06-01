@@ -147,7 +147,8 @@ def _poll_once():
         counts = {"posted": 0, "dry_run": 0, "review": 0,
                   "skip_closed": 0, "skip_dup": 0, "rows": 0}
         try:
-            _, rows = cashfree.fetch(today, today, enrich_bank_reference=False)
+            _, rows = cashfree.fetch(today, today, enrich_bank_reference=False,
+                                     quiet=True)
         except Exception as e:
             print(f"[poller:{product}] fetch failed: {e}")
             summary[product] = {**counts, "error": str(e)}
@@ -166,8 +167,13 @@ def _poll_once():
             outcome = _process_row(product, row)
             counts[outcome] = counts.get(outcome, 0) + 1
         summary[product] = counts
+        # Only log tick summary when something actually happened — silent ticks
+        # (all dedup'd) would otherwise spam the log every 2 min.
         if counts["posted"] or counts["dry_run"] or counts["review"]:
-            print(f"[poller:{product}] tick summary: {counts}")
+            print(f"[poller:{product}] posted={counts['posted']} "
+                  f"review={counts['review']} dry_run={counts['dry_run']} "
+                  f"skip_closed={counts['skip_closed']} skip_dup={counts['skip_dup']} "
+                  f"rows={counts['rows']}")
     _last_tick_at = time.time()
     _last_tick_summary = summary
 

@@ -3,7 +3,7 @@ import os
 from cashfree.common import fetch_recon
 
 
-def fetch(start_date, end_date, enrich_bank_reference=True):
+def fetch(start_date, end_date, enrich_bank_reference=True, quiet=False):
     cid = os.getenv("NBL_CLIENT_ID")
     sec = os.getenv("NBL_CLIENT_SECRET")
     if not cid or not sec:
@@ -14,4 +14,5 @@ def fetch(start_date, end_date, enrich_bank_reference=True):
         start_date=start_date,
         end_date=end_date,
         enrich_bank_reference=enrich_bank_reference,
+        quiet=quiet,
     )
